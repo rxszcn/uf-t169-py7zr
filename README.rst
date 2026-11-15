@@ -271,6 +271,17 @@ Note: if you specify only a file but not a parent directory, it will fail.
         selective_files = [f for f in allfiles if filter_pattern.match(f)]
         archive.extract(targets=selective_files)
 
+Glob patterns can be passed directly as 'extract(patterns=['*.log'])'. They use
+``fnmatch`` semantics, may be combined with ``targets``, and with
+``recursive=True`` a pattern matching a directory selects its whole subtree.
+A selection that matches nothing raises ``KeyError``.
+
+.. code-block:: python
+
+    with py7zr.SevenZipFile('archive.7z', 'r') as archive:
+        archive.extract(patterns=['*.log', 'data/*.json'])
+        archive.extract(patterns=['logs'], recursive=True)  # logs/ subtree
+
 
 py7zr support an extraction of password protected archive.(v0.6 and later)
 

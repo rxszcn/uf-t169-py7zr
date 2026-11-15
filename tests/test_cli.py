@@ -293,6 +293,15 @@ def test_cli_extract_member(tmp_path):
 
 
 @pytest.mark.cli
+def test_cli_extract_member_no_match(tmp_path, capsys):
+    arcfile = os.path.join(testdata_path, "test_1.7z")
+    cli = py7zr.cli.Cli()
+    result = cli.run(["x", arcfile, str(tmp_path.resolve()), "--files", "no/such/member"])
+    assert result == 1
+    assert "No archive member matches" in capsys.readouterr().out
+
+
+@pytest.mark.cli
 def test_cli_encrypted_extract(monkeypatch, tmp_path):
     def _getpasswd():
         return "secret"

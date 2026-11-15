@@ -68,6 +68,7 @@ from py7zr.helpers import (
     filetime_to_dt,
     get_sanitized_output_path,
     is_path_valid,
+    member_is_selected,
     readlink,
     remove_trailing_slash,
 )
@@ -699,7 +700,15 @@ class SevenZipFile(contextlib.AbstractContextManager):
         callback: ExtractCallback | None = None,
         recursive: bool | None = False,
         writer_factory: WriterFactory | None = None,
+        patterns: Collection[str] | None = None,
     ) -> None:
+        # Work out the selection before touching the archive or the caller's
+        # callback: a selection that matches nothing is an error, and the
+        # archive must stay unconsumed so the caller can retry.
+        if (targets is not None or patterns is not None) and not any(
+            member_is_selected(f.filename, targets, patterns, recursive) for f in self.files
+        ):
+            raise KeyError(self._no_match_message(targets, patterns))
         if callback is None:
             pass
         elif isinstance(callback, ExtractCallback):
@@ -722,20 +731,12 @@ class SevenZipFile(contextlib.AbstractContextManager):
                     pass
                 else:
                     raise e
-        if targets is not None:
-            # faster lookups
-            targets = set(targets)
         fnames: dict[str, int] = {}  # check duplicated filename in one archive?
         self.q.put(("pre", None, None))
         for f in self.files:
-            if targets is not None and recursive is False:
-                if f.filename not in targets:
-                    self.worker.register_filelike(f.id, None)
-                    continue
-            elif targets is not None and recursive is True:
-                if f.filename not in targets and not any([f.filename.startswith(target) for target in targets]):
-                    self.worker.register_filelike(f.id, None)
-                    continue
+            if not member_is_selected(f.filename, targets, patterns, recursive):
+                self.worker.register_filelike(f.id, None)
+                continue
 
             # When archive has a multiple files which have same name
             # To guarantee order of archive, multi-thread decompression becomes off.
@@ -1081,6 +1082,15 @@ class SevenZipFile(contextlib.AbstractContextManager):
             return True
         return False
 
+    @staticmethod
+    def _no_match_message(targets: Collection[str] | None, patterns: Collection[str] | None) -> str:
+        selectors: list[str] = []
+        if targets is not None:
+            selectors.append(f"targets {sorted(targets)!r}")
+        if patterns is not None:
+            selectors.append(f"patterns {sorted(patterns)!r}")
+        return "No archive member matches " + " and ".join(selectors)
+
     # --------------------------------------------------------------------------
     # The public methods which SevenZipFile provides:
     def getnames(self) -> list[str]:
@@ -1213,38 +1223,63 @@ class SevenZipFile(contextlib.AbstractContextManager):
         *,
         callback: ExtractCallback | None = None,
         factory: WriterFactory | None = None,
+        patterns: Collection[str] | None = None,
     ) -> None:
         """Extract selected members from the archive.
 
-        Works like :meth:`extractall` but only extracts the members named in
-        *targets*. An archive can be extracted only once per open; call
-        :meth:`reset` before extracting again.
+        Works like :meth:`extractall` but only extracts the members selected by
+        *targets* and/or *patterns*. An archive can be extracted only once per
+        open; call :meth:`reset` before extracting again.
 
         :param path: The directory to extract into. Defaults to the current
             working directory.
-        :param targets: A collection (list or set) of member names to extract,
-            or ``None`` to extract everything. Trailing slashes are ignored.
+        :param targets: A collection (list or set) of literal member names to
+            extract, or ``None``. Trailing slashes are ignored. A target is
+            never treated as a glob, so a member whose name contains ``*``,
+            ``?`` or ``[`` is selected by naming it exactly.
             For a single member pass ``["name"]``, not a bare string.
-        :param recursive: When ``True``, also extract every member whose name
-            starts with one of the *targets*, so a directory name selects its
-            whole subtree.
+        :param recursive: When ``True``, a target also selects every member
+            below it, so a directory name selects its whole subtree. A
+            pattern that matches a directory selects its subtree as well.
         :param callback: An optional
             :class:`py7zr.callbacks.ExtractCallback` instance that receives
             progress reports.
         :param factory: An optional :class:`WriterFactory`; see
             :meth:`extractall`.
-        :raises TypeError: If *targets* is not a collection or ``None``.
+        :param patterns: A collection (list or set) of glob patterns matched
+            against member names with :mod:`fnmatch` semantics: ``*`` matches
+            any run of characters including ``/``, ``?`` exactly one
+            character, ``[seq]`` one character of *seq* and ``[!seq]`` one
+            character not in *seq*. Matching is case-sensitive on all
+            platforms. Trailing slashes are ignored. Targets and patterns are
+            united: a member is extracted when either selects it.
+        :raises TypeError: If *targets* or *patterns* is not a collection or
+            ``None``.
+        :raises KeyError: If the selection matches no member. Nothing is
+            extracted and the archive remains usable.
         """
         if not self._is_none_or_collection(targets):
             raise TypeError(
                 "targets must be a list or set of file names, or None; "
                 "for a single file, use ['filename']"
             )
+        if not self._is_none_or_collection(patterns):
+            raise TypeError(
+                "patterns must be a list or set of glob patterns, or None; "
+                "for a single pattern, use ['*.txt']"
+            )
         # For interoperability with ZipFile, we strip any trailing slashes
         # This also matches the behavior of TarFile
         if targets is not None:
             targets = [remove_trailing_slash(target) for target in targets]
-        self._extract(path, targets, recursive=recursive, callback=callback, writer_factory=factory)
+        self._extract(
+            path,
+            targets,
+            recursive=recursive,
+            callback=callback,
+            writer_factory=factory,
+            patterns=patterns,
+        )
 
     def reporter(self, callback: ExtractCallback) -> None:
         """Forward progress events from the worker to *callback* (internal).

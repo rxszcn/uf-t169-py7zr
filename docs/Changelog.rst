@@ -9,6 +9,17 @@ All notable changes to this project will be documented in this file.
 `Unreleased`_
 =============
 
+Added
+-----
+- :meth:`~py7zr.SevenZipFile.extract` accepts a ``patterns`` argument, a
+  collection of glob patterns matched against member names with
+  :mod:`fnmatch` semantics (``*``, ``?``, ``[seq]``, ``[!seq]``, case-sensitive
+  and ``*`` also matching ``/``). It can be combined with ``targets``; the two
+  selectors are united. ``recursive=True`` extends a pattern that matches a
+  directory to its subtree. A selection that matches no member now raises
+  ``KeyError`` and leaves the archive unconsumed; this also applies to
+  ``targets`` alone.
+
 Changed
 -------
 - Switch the 7zAES crypto dependency from ``pycryptodomex`` (``Cryptodome``

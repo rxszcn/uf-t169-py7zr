@@ -22,13 +22,42 @@ members by pattern:
         targets = [f for f in allfiles if filter_pattern.match(f)]
         archive.extract(path='out', targets=targets)
 
+``patterns`` selects members with glob patterns directly, without listing the
+archive first:
+
+.. code-block:: python
+
+    with SevenZipFile('archive.7z', 'r') as archive:
+        # Only the text logs, wherever they are.
+        archive.extract(path='out', patterns=['*.log'])
+        # Only the structured manifests, under a matching directory name.
+        archive.extract(path='out', patterns=['data/*.json'])
+
+Patterns use the :mod:`fnmatch` conventions: ``*`` matches any run of
+characters including ``/``, ``?`` exactly one character, ``[seq]`` one
+character in *seq* and ``[!seq]`` one character not in *seq*. Matching is
+case-sensitive on every platform. ``targets`` and ``patterns`` may be given
+together and are united: a member is extracted when either selects it.
+
+A target is always a literal name, never a glob. A member whose name contains
+wildcard characters, such as ``weird[1].dat``, is therefore selected by naming
+it in ``targets`` -- ``patterns=['weird[1].dat']`` would instead mean "the
+character class ``[1]``" and match ``weird1.dat``.
+
 With ``recursive=True``, a target also selects every member whose name starts
-with it, so naming a directory extracts its whole subtree:
+with it, so naming a directory extracts its whole subtree. A pattern that
+matches a directory likewise selects that subtree, so
+``patterns=['scripts'], recursive=True`` behaves like the code below:
 
 .. code-block:: python
 
     with SevenZipFile('archive.7z', 'r') as archive:
         archive.extract(path='out', targets=['scripts'], recursive=True)
+
+If the selection matches no member, :meth:`~py7zr.SevenZipFile.extract` raises
+:exc:`KeyError` and extracts nothing; the archive remains usable, so a
+corrected call can follow. Pass ``recursive=True`` when a pattern names a
+directory and its contents are wanted.
 
 An archive can be extracted only once per open. To extract again from the same
 :class:`~py7zr.SevenZipFile` object, call :meth:`~py7zr.SevenZipFile.reset`

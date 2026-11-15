@@ -378,6 +378,9 @@ class Cli:
             else:
                 print("The archive is corrupted, or password is wrong. ABORT.")
             return 1
+        except KeyError as e:
+            print(f"{e.args[0] if e.args else e}. ABORT.")
+            return 1
         else:
             return 0
 

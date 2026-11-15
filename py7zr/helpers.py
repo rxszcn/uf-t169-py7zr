@@ -23,6 +23,7 @@
 from __future__ import annotations
 
 import ctypes
+import fnmatch
 import hashlib
 import os
 import pathlib
@@ -32,6 +33,7 @@ import re
 import sys
 import time as _time
 import zlib
+from collections.abc import Collection
 from datetime import datetime, timedelta, timezone, tzinfo
 from typing import TYPE_CHECKING
 
@@ -310,6 +312,70 @@ def remove_trailing_slash(path: str) -> str:
     if path.endswith(posixpath.sep):
         return path[:-1]
     return path
+
+
+def _matches_pattern(name: str, pattern: str, recursive: bool | None) -> bool:
+    """Return True when *name* matches the glob *pattern*.
+
+    Matching is case-sensitive on every platform, so a selection behaves the
+    same on Windows and POSIX.  A single ``*`` also matches ``/``: ``*.log``
+    selects ``logs/app.log`` as well as ``readme.log``.
+
+    With *recursive* set, a pattern that matches a directory also selects
+    everything below it, exactly like ``recursive=True`` does for a literal
+    target: ``logs`` then selects ``logs/app.log`` but not ``logs2/app.log``.
+    """
+    if fnmatch.fnmatchcase(name, pattern):
+        return True
+    if not recursive:
+        return False
+    components = name.split(posixpath.sep)
+    for index in range(1, len(components)):
+        if fnmatch.fnmatchcase(posixpath.sep.join(components[:index]), pattern):
+            return True
+    return False
+
+
+def member_is_selected(
+    name: str,
+    targets: Collection[str] | None,
+    patterns: Collection[str] | None,
+    recursive: bool | None = False,
+) -> bool:
+    """Decide whether an archive member called *name* is selected.
+
+    This is the single filter shared by the on-disk and ``WriterFactory``
+    extraction paths.
+
+    *targets* are literal member names and are never interpreted as globs; a
+    file whose name contains ``*``, ``?`` or ``[`` is therefore selected by
+    putting that exact name in *targets*.  *patterns* are glob patterns using
+    the usual ``fnmatch`` meanings (``*``, ``?``, ``[seq]``, ``[!seq]``).  The
+    two selectors are united: a member is selected when either matches it.
+
+    When *recursive* is true, a target also selects every member below it
+    (``logs`` selects ``logs/app.log``, but not ``logs2/app.log``), and a
+    pattern that matches a directory selects that whole subtree.  When both
+    *targets* and *patterns* are ``None`` every member is selected.
+
+    Trailing slashes on targets and patterns are ignored, so a directory name
+    may be written with or without one.
+    """
+    if targets is None and patterns is None:
+        return True
+    name = remove_trailing_slash(name)
+    if targets is not None:
+        for target in targets:
+            target = remove_trailing_slash(target)
+            if name == target:
+                return True
+            if recursive and name.startswith(target + posixpath.sep):
+                return True
+    if patterns is not None:
+        for pattern in patterns:
+            if _matches_pattern(name, remove_trailing_slash(pattern), bool(recursive)):
+                return True
+    return False
 
 
 def canonical_path(target: pathlib.Path) -> pathlib.Path:
